@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 import collections
+import io
 import os
 import pickle
 import random
 
+from mastodon import Mastodon
+import matplotlib as mpl
 from num2words import num2words
-import osmnx as ox
 
+mpl.use("agg")
+
+import osmnx as ox  # noqa: E402
+
+MASTODON_SERVER = os.environ["MASTODON_SERVER"]
+MASTODON_USERNAME = os.environ["MASTODON_USERNAME"]
+MASTODON_PASSWORD = os.environ["MASTODON_PASSWORD"]
 COUNTIES_FILENAME = "counties.pickle"
 NEIGHBORS_FILENAME = "neighbors.pickle"
 COUNTIES = [
@@ -71,6 +80,8 @@ COUNTIES = [
 ]
 assert len(COUNTIES) == 58
 
+Media = collections.namedtuple("Media", ["buf", "mimetype", "description"])
+
 
 def fetch_counties_gdf():
     names = ["{} County, California, USA".format(county)
@@ -99,6 +110,31 @@ def cache_result(path, func, *args, **kwargs):
         with open(path, "wb") as f:
             pickle.dump(result, f)
         return result
+
+
+def log_in():
+    mastodon = Mastodon(
+        client_id="pytooter_clientcred.secret",
+        api_base_url=MASTODON_SERVER
+    )
+    mastodon.log_in(
+        MASTODON_USERNAME,
+        MASTODON_PASSWORD
+    )
+    return mastodon
+
+
+def make_post(mastodon, text, media_in):
+    media_dicts = []
+    for media in media_in:
+        media_dict = mastodon.media_post(media.buf, media.mimetype,
+                                         media.description)
+        media_dicts.append(media_dict)
+    mastodon.status_post(
+        text,
+        media_ids=media_dicts,
+        language="en"
+    )
 
 
 def main():
@@ -136,11 +172,18 @@ def main():
         for county_id in california:
             face_colors[county_id] = color
 
-    number_word = num2words(n_californias)
-    print("{} Californias".format(number_word[:1].upper() + number_word[1:]))
-
     fig, ax = ox.plot_shape(projected, fc=face_colors)
-    fig.savefig("map.png")
+    bio = io.BytesIO()
+    fig.savefig(bio)
+    bio.seek(0)
+
+    number_word = num2words(n_californias)
+    text = "{} Californias".format(number_word[:1].upper() + number_word[1:])
+    description = ("A map of California, where the counties are {} different "
+                   "colors".format(n_californias))
+
+    mastodon = log_in()
+    make_post(mastodon, text, [Media(bio, "image/png", description)])
 
 
 if __name__ == "__main__":

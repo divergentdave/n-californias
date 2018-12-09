@@ -1,3 +1,5 @@
 *.pickle
 *.png
 *.pyc
+*.secret
+/.env
