@@ -12,6 +12,7 @@ from num2words import num2words
 mpl.use("agg")
 
 import osmnx as ox  # noqa: E402
+import seaborn  # noqa: E402
 
 MASTODON_SERVER = os.environ["MASTODON_SERVER"]
 MASTODON_USERNAME = os.environ["MASTODON_USERNAME"]
@@ -165,10 +166,8 @@ def main():
 
     projected = ox.project_gdf(counties)
     face_colors = [None] * len(geom_list)
-    for california in californias:
-        color = "#{:02x}{:02x}{:02x}".format(random.randint(0x60, 0xe0),
-                                             random.randint(0x60, 0xe0),
-                                             random.randint(0x60, 0xe0))
+    palette = random.sample(list(seaborn.xkcd_rgb.values()), n_californias)
+    for color, california in zip(palette, californias):
         for county_id in california:
             face_colors[county_id] = color
 
