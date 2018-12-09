@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import collections
 import io
+import math
 import os
 import pickle
 import random
@@ -144,7 +145,8 @@ def main():
     geom_list = counties["geometry"].tolist()
     neighbors = cache_result(NEIGHBORS_FILENAME, compute_neighbors, geom_list)
 
-    n_californias = random.randint(2, 20)
+    n_californias = int(math.floor(random.triangular(2, len(COUNTIES) + 1, 2)))
+    n_californias = min(n_californias, len(COUNTIES))
     remaining = set(range(len(geom_list)))
     californias = []
     for _ in range(n_californias):
