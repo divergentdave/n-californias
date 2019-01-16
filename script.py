@@ -5,6 +5,7 @@ import math
 import os
 import pickle
 import random
+import sys
 
 from mastodon import Mastodon
 import matplotlib as mpl
@@ -15,10 +16,9 @@ mpl.use("agg")
 import osmnx as ox  # noqa: E402
 import seaborn  # noqa: E402
 
-MASTODON_SERVER = os.environ["MASTODON_SERVER"]
-MASTODON_USERNAME = os.environ["MASTODON_USERNAME"]
-MASTODON_PASSWORD = os.environ["MASTODON_PASSWORD"]
+CLIENT_CRED_SECRET_FILENAME = "pytooter_clientcred.secret"
 COUNTIES_FILENAME = "counties.pickle"
+PROJECTED_FILENAME = "projected.pickle"
 NEIGHBORS_FILENAME = "neighbors.pickle"
 COUNTIES = [
     "Alameda",
@@ -114,15 +114,12 @@ def cache_result(path, func, *args, **kwargs):
         return result
 
 
-def log_in():
+def log_in(server, username, password):
     mastodon = Mastodon(
-        client_id="pytooter_clientcred.secret",
-        api_base_url=MASTODON_SERVER
+        client_id=CLIENT_CRED_SECRET_FILENAME,
+        api_base_url=server
     )
-    mastodon.log_in(
-        MASTODON_USERNAME,
-        MASTODON_PASSWORD
-    )
+    mastodon.log_in(username, password)
     return mastodon
 
 
@@ -139,14 +136,15 @@ def make_post(mastodon, text, media_in):
     )
 
 
-def main():
+def make_map(n_californias):
     counties = cache_result(COUNTIES_FILENAME, fetch_counties_gdf)
+    projected = cache_result(PROJECTED_FILENAME, ox.project_gdf, counties)
     geom_list = list(counties.itertuples())
     geom_list = counties["geometry"].tolist()
     neighbors = cache_result(NEIGHBORS_FILENAME, compute_neighbors, geom_list)
 
-    n_californias = int(math.floor(random.triangular(2, len(COUNTIES) + 1, 2)))
     n_californias = min(n_californias, len(COUNTIES))
+
     remaining = set(range(len(geom_list)))
     californias = []
     for _ in range(n_californias):
@@ -166,7 +164,6 @@ def main():
         californias[which_california].append(new_neighbor)
         remaining.remove(new_neighbor)
 
-    projected = ox.project_gdf(counties)
     face_colors = [None] * len(geom_list)
     palette = random.sample(list(seaborn.xkcd_rgb.values()), n_californias)
     for color, california in zip(palette, californias):
@@ -183,8 +180,56 @@ def main():
     description = ("A map of California, where the counties are {} different "
                    "colors".format(n_californias))
 
-    mastodon = log_in()
-    make_post(mastodon, text, [Media(bio, "image/png", description)])
+    return text, bio, description
+
+
+def main():
+    args = sys.argv[1:]
+    dry_run = ("--dry-run" in args or "-d" in args)
+
+    if "--help" in args or "-h" in args:
+        print("Usage: Run with no arguments to post a status. Pass --dry-run "
+              "or -d as a command line argument to create a map, but not post "
+              "it.")
+        print()
+        print("The environment variables MASTODON_SERVER, MASTODON_USERNAME, "
+              "and MASTODON_PASSWORD must be set with account credentials "
+              "to post a status.")
+        sys.exit(0)
+
+    if not dry_run:
+        if not os.path.isfile(CLIENT_CRED_SECRET_FILENAME):
+            print("Error: {} does not exist, run Mastodon.create_app manually "
+                  "first".format(CLIENT_CRED_SECRET_FILENAME), file=sys.stderr)
+            sys.exit(1)
+        server = os.environ.get("MASTODON_SERVER")
+        if server is None:
+            print("Error: Set the environment variable MASTODON_SERVER to the "
+                  "URL of the Mastodon server", file=sys.stderr)
+            sys.exit(1)
+        username = os.environ.get("MASTODON_USERNAME")
+        if username is None:
+            print("Error: Set the environment variable MASTODON_USERNAME to "
+                  "your username or email", file=sys.stderr)
+            sys.exit(1)
+        password = os.environ.get("MASTODON_PASSWORD")
+        if password is None:
+            print("Error: Set the environment variable MASTODON_PASSWORD to "
+                  "your password", file=sys.stderr)
+            sys.exit(1)
+
+    n_californias = int(math.floor(random.triangular(2, len(COUNTIES) + 1, 2)))
+    text, img_data, description = make_map(n_californias)
+
+    if dry_run:
+        print("Text: {!r}".format(text))
+        print("Image description: {!r}".format(description))
+        with open("image.png", "wb") as f:
+            f.write(img_data.read())
+        print("Map saved to image.png")
+    else:
+        mastodon = log_in(server, username, password)
+        make_post(mastodon, text, [Media(img_data, "image/png", description)])
 
 
 if __name__ == "__main__":
