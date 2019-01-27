@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import collections
+import datetime
 import io
 import math
 import os
@@ -136,7 +137,25 @@ def make_post(mastodon, text, media_in):
     )
 
 
-def make_map(n_californias):
+def holiday_colors():
+    today = datetime.date.today()
+    holidays = [
+        (datetime.date(today.year, 2, 14), ("red", "pink")),
+        (datetime.date(today.year, 3, 17), ("green",)),
+        (datetime.date(today.year, 7, 4), ("red", "white", "blue")),
+        (datetime.date(today.year, 10, 31), ("black", "orange")),
+        (datetime.date(today.year, 12, 25), ("red", "green")),
+    ]
+    week = datetime.timedelta(weeks=1)
+    for holiday_date, holiday_color_kws in holidays:
+        if holiday_date - week < today and today <= holiday_date:
+            return ([rgb for name, rgb in seaborn.xkcd_rgb.items()
+                     if any(kw in name.lower() for kw in holiday_color_kws)],
+                    holiday_color_kws)
+    return list(seaborn.xkcd_rgb.values()), None
+
+
+def make_map(n_californias, all_colors, color_keywords):
     counties = cache_result(COUNTIES_FILENAME, fetch_counties_gdf)
     projected = cache_result(PROJECTED_FILENAME, ox.project_gdf, counties)
     geom_list = list(counties.itertuples())
@@ -144,6 +163,7 @@ def make_map(n_californias):
     neighbors = cache_result(NEIGHBORS_FILENAME, compute_neighbors, geom_list)
 
     n_californias = min(n_californias, len(COUNTIES))
+    n_californias = min(n_californias, len(all_colors))
 
     remaining = set(range(len(geom_list)))
     californias = []
@@ -165,7 +185,7 @@ def make_map(n_californias):
         remaining.remove(new_neighbor)
 
     face_colors = [None] * len(geom_list)
-    palette = random.sample(list(seaborn.xkcd_rgb.values()), n_californias)
+    palette = random.sample(all_colors, n_californias)
     for color, california in zip(palette, californias):
         for county_id in california:
             face_colors[county_id] = color
@@ -177,8 +197,20 @@ def make_map(n_californias):
 
     number_word = num2words(n_californias)
     text = "{} Californias".format(number_word[:1].upper() + number_word[1:])
-    description = ("A map of California, where the counties are {} different "
-                   "colors".format(n_californias))
+    if color_keywords is None:
+        description = ("A map of California, where the counties are {} "
+                       "different colors".format(n_californias))
+    else:
+        if len(color_keywords) == 1:
+            kws_joined = color_keywords[0]
+        elif len(color_keywords) == 2:
+            kws_joined = " and ".join(color_keywords)
+        else:
+            kws_joined = "{}, and {}".format(", ".join(color_keywords[:-1]),
+                                             color_keywords[-1])
+        description = ("A map of California, where the counties are {} "
+                       "different shades of {}".format(n_californias,
+                                                       kws_joined))
 
     return text, bio, description
 
@@ -218,8 +250,12 @@ def main():
                   "your password", file=sys.stderr)
             sys.exit(1)
 
-    n_californias = int(math.floor(random.triangular(2, len(COUNTIES) + 1, 2)))
-    text, img_data, description = make_map(n_californias)
+    all_colors, color_keywords = holiday_colors()
+    max_n_californias = min(len(COUNTIES), len(all_colors))
+    n_californias = int(math.floor(random.triangular(2, max_n_californias + 1,
+                                                     2)))
+    text, img_data, description = make_map(n_californias, all_colors,
+                                           color_keywords)
 
     if dry_run:
         print("Text: {!r}".format(text))
